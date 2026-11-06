@@ -1,0 +1,6 @@
+import { useDiagnostics } from './useDiagnostics';
+import type { TelemetrySource } from '../../core/robot';
+export function Diagnostics({ source }: { source: TelemetrySource }) {
+ const { s, busy, result, reason, call } = useDiagnostics(source);
+ return <section><h1>ROS bridge</h1><p><strong className="badge">{s.status}</strong> {s.url}</p>{s.error && <p role="alert">{s.error}</p>}<h2>Capabilities</h2><p>{s.serverInfo?.capabilities.join(', ') || 'None advertised'}</p><h2>Channels</h2><table><thead><tr><th>ID</th><th>Topic</th><th>Schema</th><th>Encoding</th></tr></thead><tbody>{s.channels.map(c => <tr key={c.id}><td>{c.id}</td><td>{c.topic}</td><td>{c.schemaName}</td><td>{c.encoding}</td></tr>)}</tbody></table><h2>Services</h2><table><thead><tr><th>ID</th><th>Name</th><th>Type</th></tr></thead><tbody>{s.services.map(x => <tr key={x.id}><td>{x.id}</td><td>{x.name}</td><td>{x.type}</td></tr>)}</tbody></table><p>{reason}</p><button disabled={busy || !!reason} onClick={call}>{busy ? 'Calling…' : 'Call /web_ping'}</button><pre aria-live="polite">{result}</pre></section>;
+}

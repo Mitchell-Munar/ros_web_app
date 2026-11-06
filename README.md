@@ -18,3 +18,14 @@ No topic subscriptions or publishing are implemented. Missing service schemas pr
 ## Verification
 
 `npm run build` checks strict TypeScript and builds production assets. `npm test` runs focused mock, response validation, and CDR round-trip checks using Node's built-in test runner. Real bridge and browser behavior require the manual checklist above.
+
+## Architecture and Phase 0
+
+`src/app` owns configuration, robot session context, composition, and layout.
+`src/features/diagnostics` separates hooks from presentation and consumes the session interface.
+`src/core/robot` owns transport, decoding, mock implementation, registry, and vanilla Zustand snapshots.
+`src/types` holds ROS contracts; `src/shared` is reserved for generic utilities.
+Cross-module imports use public index files. Sessions are keyed by robot ID and survive React subscription cleanup.
+
+Run `npm run lint`, `npm run build`, and `npm test` (Vitest) before manual testing.
+The real bridge checklist above remains required; automated checks do not establish robot compatibility.
