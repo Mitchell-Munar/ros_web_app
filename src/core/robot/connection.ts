@@ -89,7 +89,11 @@ export class Connection implements TelemetrySource {
 }
 export class Mock extends Connection {
   override subscribeTopic(_topic: string, listener: (value: unknown) => void) {
-    const timer = setTimeout(() => listener({ info: { width: 100, height: 80, resolution: 0.05, origin: { position: { x: 0, y: 0 }, orientation: { x: 0, y: 0, z: 0, w: 1 } } }, data: Array.from({ length: 8000 }, (_, i) => i % 100 < 10 ? -1 : i % 100 === 50 || Math.floor(i / 100) === 40 ? 100 : 0) }), 0);
+    if (_topic === '/tf' || _topic === '/tf_static') {
+      const emit = () => { const a = performance.now()/3000; listener({ transforms: [{header:{frame_id:'map'},child_frame_id:'odom',transform:{translation:{x:0,y:0,z:0},rotation:{x:0,y:0,z:0,w:1}}}, {header:{frame_id:'odom'},child_frame_id:'base_link',transform:{translation:{x:2+Math.cos(a),y:2+Math.sin(a),z:0},rotation:{x:0,y:0,z:Math.sin((a+Math.PI/2)/2),w:Math.cos((a+Math.PI/2)/2)}}}] }); };
+      const first=setTimeout(emit,0); const interval=setInterval(emit,50); return ()=>{clearTimeout(first);clearInterval(interval);};
+    }
+    const timer = setTimeout(() => listener({ header: {frame_id:'map'}, info: { width: 100, height: 80, resolution: 0.05, origin: { position: { x: 0, y: 0 }, orientation: { x: 0, y: 0, z: 0, w: 1 } } }, data: Array.from({ length: 8000 }, (_, i) => i % 100 < 10 ? -1 : i % 100 === 50 || Math.floor(i / 100) === 40 ? 100 : 0) }), 0);
     return () => clearTimeout(timer);
   }
   override start() { this.update({ status: 'connected', url: 'mock (no socket)', serverInfo: { op: 'serverInfo', name: 'Mock bridge', capabilities: ['services'], supportedEncodings: ['cdr'] }, services: [{ id: 1, name: '/web_ping', type: 'std_srvs/srv/Trigger', requestSchema: '', responseSchema: 'bool success\nstring message' }] }); }

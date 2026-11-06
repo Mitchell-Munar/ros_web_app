@@ -32,3 +32,8 @@
 
 * Drive the robot with teleop (or physically push it) and verify the robot marker updates smoothly in real time on the web canvas without framerate drops or React state thrashing.
 * Verify missing transforms (e.g., TF lookup timeout before map frame exists) fail gracefully without crashing the app shell.
+Phase 2B implementation notes:
+* Planar TF composition and 20 Hz canvas marker implemented; dynamic transforms expire after 2 seconds of local receipt time. Static transforms do not expire.
+* Marker is a generic circle with heading, not a configured robot footprint.
+* Real robot/RViz comparison, reconnect and StrictMode browser checks remain pending.
+* Future: full 3D transform composition, timestamp-synchronized TF history, configurable frame names and timeout, and retained static TF across feature remounts.
