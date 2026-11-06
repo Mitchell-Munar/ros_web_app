@@ -2,7 +2,7 @@ import { FoxgloveClient, type Channel, type Service, type ServerInfo } from '@fo
 import { parse } from '@foxglove/rosmsg';
 import { MessageReader, MessageWriter } from '@foxglove/rosmsg2-serialization';
 export interface Snapshot { status: string; url: string; serverInfo?: ServerInfo; channels: Channel[]; services: Service[]; error?: string }
-export interface TelemetrySource { start(): void; stop(): void; subscribe(listener: () => void): () => void; getSnapshot(): Snapshot; callService(name: string, request: Record<string, unknown>): Promise<unknown> }
+export interface TelemetrySource { start(): void; stop(): void; subscribe(listener: () => void): () => void; getSnapshot(): Snapshot; subscribeTopic(topic: string, listener: (value: unknown) => void, error: (message: string) => void): () => void; callService(name: string, request: Record<string, unknown>): Promise<unknown> }
 import { createStore } from 'zustand/vanilla';
 import { pingResponse } from '../../types';
 type Pending = { serviceId: number; finish(value?: unknown, error?: Error): void; reader: MessageReader };
@@ -10,6 +10,25 @@ export class Connection implements TelemetrySource {
   constructor(private readonly url: string) {}
   private store = createStore<Snapshot>(() => ({ status: 'disconnected', url: this.url, channels: [], services: [] }));
   protected get snapshot() { return this.store.getState(); }
+  private topics = new Map<string, Set<{ listener(value: unknown): void; error(message: string): void }>>();
+  private readers = new Map<number, { topic: string; reader: MessageReader }>();
+  subscribeTopic(topic: string, listener: (value: unknown) => void, error: (message: string) => void) {
+    const entry = { listener, error };
+    const entries = this.topics.get(topic) ?? new Set(); this.topics.set(topic, entries); entries.add(entry); this.syncTopics();
+    return () => { entries.delete(entry); if (!entries.size) { this.topics.delete(topic); for (const [id, item] of this.readers) if (item.topic === topic) { this.client?.unsubscribe(id); this.readers.delete(id); } } };
+  }
+  private syncTopics() {
+    if (!this.client || this.snapshot.status !== 'connected') return;
+    for (const [topic, entries] of this.topics) {
+      if ([...this.readers.values()].some(item => item.topic === topic)) continue;
+      const channel = this.snapshot.channels.find(c => c.topic === topic); if (!channel) continue;
+      try {
+        if (channel.encoding !== 'cdr' || channel.schemaEncoding !== 'ros2msg' || typeof channel.schema !== 'string') throw new Error('Unsupported or absent topic schema');
+        const reader = new MessageReader(parse(channel.schema, { ros2: true }));
+        this.readers.set(this.client.subscribe(channel.id), { topic, reader });
+      } catch (e) { entries.forEach(entry => entry.error(String(e))); }
+    }
+  }
   private client?: FoxgloveClient;
   private active = false;
   private timer?: ReturnType<typeof setTimeout>;
@@ -21,7 +40,7 @@ export class Connection implements TelemetrySource {
   protected update(patch: Partial<Snapshot>) { this.store.setState(patch); }
   start() { if (this.active) return; this.active = true; this.connect(); }
   stop() { this.active = false; clearTimeout(this.timer); const client = this.client; this.client = undefined; client?.close(); this.clear(); }
-  private clear() { for (const p of this.pending.values()) p.finish(undefined, new Error('Connection closed')); this.update({ status: 'disconnected', serverInfo: undefined, channels: [], services: [] }); }
+  private clear() { this.readers.clear(); this.topics.forEach(entries => entries.forEach(e => e.error('Disconnected'))); for (const p of this.pending.values()) p.finish(undefined, new Error('Connection closed')); this.update({ status: 'disconnected', serverInfo: undefined, channels: [], services: [] }); }
   private connect() {
     if (!this.active) return;
     this.update({ status: 'connecting', error: undefined });
@@ -30,7 +49,8 @@ export class Connection implements TelemetrySource {
     client.on('error', error => this.update({ error: error.message }));
     client.on('close', () => { if (this.client !== client) return; this.clear(); if (this.active) this.timer = setTimeout(() => this.connect(), Math.min(30000, 500 * 2 ** Math.min(this.attempt++, 6)) * (0.8 + Math.random() * 0.4)); });
     client.on('serverInfo', serverInfo => { console.log('Raw serverInfo', serverInfo); this.attempt = 0; this.update({ serverInfo }); });
-    client.on('advertise', channels => this.update({ channels: [...this.snapshot.channels.filter(c => !channels.some(n => n.id === c.id)), ...channels] }));
+    client.on('advertise', channels => { this.update({ channels: [...this.snapshot.channels.filter(c => !channels.some(n => n.id === c.id)), ...channels] }); this.syncTopics(); });
+    client.on('message', event => { const item = this.readers.get(event.subscriptionId); if (!item) return; try { const value: unknown = item.reader.readMessage(event.data); this.topics.get(item.topic)?.forEach(e => e.listener(value)); } catch (error) { this.topics.get(item.topic)?.forEach(e => e.error(String(error))); } });
     client.on('unadvertise', ids => this.update({ channels: this.snapshot.channels.filter(c => !ids.includes(c.id)) }));
     client.on('advertiseServices', services => { console.log('Raw service advertisements', services); this.update({ services: [...this.snapshot.services.filter(s => !services.some(n => n.id === s.id)), ...services] }); });
     client.on('unadvertiseServices', ids => { for (const p of this.pending.values()) if (ids.includes(p.serviceId)) p.finish(undefined, new Error('Service removed')); this.update({ services: this.snapshot.services.filter(s => !ids.includes(s.id)) }); });
@@ -68,6 +88,10 @@ export class Connection implements TelemetrySource {
   }
 }
 export class Mock extends Connection {
+  override subscribeTopic(_topic: string, listener: (value: unknown) => void) {
+    const timer = setTimeout(() => listener({ info: { width: 100, height: 80, resolution: 0.05, origin: { position: { x: 0, y: 0 }, orientation: { x: 0, y: 0, z: 0, w: 1 } } }, data: Array.from({ length: 8000 }, (_, i) => i % 100 < 10 ? -1 : i % 100 === 50 || Math.floor(i / 100) === 40 ? 100 : 0) }), 0);
+    return () => clearTimeout(timer);
+  }
   override start() { this.update({ status: 'connected', url: 'mock (no socket)', serverInfo: { op: 'serverInfo', name: 'Mock bridge', capabilities: ['services'], supportedEncodings: ['cdr'] }, services: [{ id: 1, name: '/web_ping', type: 'std_srvs/srv/Trigger', requestSchema: '', responseSchema: 'bool success\nstring message' }] }); }
   override stop() { this.update({ status: 'disconnected' }); }
   override async callService(name: string) { if (name !== '/web_ping') throw new Error('Unknown service'); await new Promise(resolve => setTimeout(resolve, 200)); return { success: true, message: 'Mock pong' }; }

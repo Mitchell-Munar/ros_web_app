@@ -8,7 +8,6 @@ No topic subscriptions or publishing are implemented. Missing service schemas pr
 
 - Mock mode: inspect service table, call ping, verify response and roughly 200 ms latency.
 - Real mode: inspect serverInfo and service advertisements in console; verify channel and service tables.
-- Call /web_ping and confirm response and latency.
 - Restart bridge; verify reconnect, cleared stale tables, and refreshed discovery.
 - Check missing service capability disables the button; missing schemas produce an explanatory error.
 - Verify remote URL displayed matches .env.local.
